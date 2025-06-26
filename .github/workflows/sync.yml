@@ -1,0 +1,63 @@
+name: Sync Selected OpenRS2 Files from List
+
+on:
+  schedule:
+    - cron: '0 0 * * 0'  # Weekly
+  workflow_dispatch:      # Manual trigger
+
+permissions:
+  contents: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout your repo
+        uses: actions/checkout@v4
+
+      - name: Clone OpenRS2 repo
+        run: git clone --depth=1 https://github.com/openrs2/openrs2 openrs2-upstream
+
+      - name: List available OpenRS2 source files
+        run: |
+          echo "Available source files in openrs2-upstream:"
+          find openrs2-upstream -type f -name '*.kt' | sort
+
+      - name: Save file list to tracked-files-candidates.txt
+        run: |
+          find openrs2-upstream -type f -name '*.kt' | sort > tracked-files-candidates.txt
+
+      - name: Upload candidates file
+        uses: actions/upload-artifact@v4
+        with:
+          name: tracked-files-candidates
+          path: tracked-files-candidates.txt
+      - name: Clear old synced files
+        run: rm -rf original && mkdir -p original
+
+      - name: Copy files listed in tracked-files.txt
+        run: |
+          while IFS= read -r FILE || [ -n "$FILE" ]; do
+            # Ignore empty lines and comments
+            if [[ -z "$FILE" || "$FILE" == \#* ]]; then continue; fi
+            
+            SRC="openrs2-upstream/$FILE"
+            DEST="original/$FILE"
+
+            echo "Preparing to copy: $SRC -> $DEST"
+            mkdir -p "original/$(dirname "$FILE")"
+            cp "openrs2-upstream/$FILE" "original/$FILE"
+          done < tracked-files.txt
+
+      - name: Commit changes if any
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add original
+          if git diff --cached --quiet; then
+            echo "No changes detected"
+          else
+            git commit -m "chore: sync tracked OpenRS2 files [automated]"
+            git push
+          fi
